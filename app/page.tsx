@@ -24,7 +24,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const bookingUrl = "https://billionairecoachbobmiller.net/calendar";
 
@@ -265,135 +265,117 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [activeStepIdx, setActiveStepIdx] = useState(0);
+  const [stepDirection, setStepDirection] = useState(1);
   const [selectedPlanIdx, setSelectedPlanIdx] = useState(3);
   const [activeOutcomeFilter, setActiveOutcomeFilter] = useState("all");
-  const processSectionRef = useRef<HTMLElement | null>(null);
-  const processShowcaseRef = useRef<HTMLDivElement | null>(null);
-  const activeStepRef = useRef(activeStepIdx);
-  const lastProcessStepAtRef = useRef(0);
-  const processExitedAtBottomRef = useRef(false);
-  const processExitStartedAtRef = useRef(0);
-  const processNavigationBypassUntilRef = useRef(0);
+  const processTrackerRef = useRef<HTMLDivElement>(null);
+  const activeStepRef = useRef(0);
+  const processWheelLockedRef = useRef(false);
+  const processWheelReleaseTimerRef = useRef<number | null>(null);
   const { scrollY } = useScroll();
+  const updateProcessStep = (nextIndex: number) => {
+    const boundedIndex = Math.max(0, Math.min(processSteps.length - 1, nextIndex));
+    const currentIndex = activeStepRef.current;
+
+    if (currentIndex === boundedIndex) return;
+
+    activeStepRef.current = boundedIndex;
+    setStepDirection(boundedIndex > currentIndex ? 1 : -1);
+    setActiveStepIdx(boundedIndex);
+  };
 
   useMotionValueEvent(scrollY, "change", (latest) => {
     setScrolled(latest > 24);
   });
 
   useEffect(() => {
-    activeStepRef.current = activeStepIdx;
-  }, [activeStepIdx]);
+    const scrollToTarget = (target: HTMLElement, duration: number) => {
+      const smoothScroller = (window as unknown as {
+        lenis?: { scrollTo: (element: HTMLElement, options: { offset: number; duration: number }) => void };
+      }).lenis;
 
-  useEffect(() => {
-    const handleSectionLinkClick = (event: MouseEvent) => {
-      if (!(event.target instanceof Element)) return;
-
-      const link = event.target.closest<HTMLAnchorElement>('a[href^="#"]');
-      if (!link) return;
-
-      const destination = link.getAttribute("href");
-
-      // Header/section navigation always takes precedence over the step flow.
-      // Keep the wheel handler disabled for the whole smooth-scroll journey.
-      processNavigationBypassUntilRef.current = performance.now() +
-        (destination === "#process" ? 1200 : 5000);
-
-      if (destination === "#process") {
-        processExitedAtBottomRef.current = false;
-        activeStepRef.current = 0;
-        setActiveStepIdx(0);
-      } else {
-        processExitedAtBottomRef.current = true;
+      if (smoothScroller) {
+        smoothScroller.scrollTo(target, { offset: -92, duration });
+        return;
       }
+
+      window.scrollTo({
+        top: window.scrollY + target.getBoundingClientRect().top - 92,
+        behavior: "smooth",
+      });
     };
 
-    document.addEventListener("click", handleSectionLinkClick);
-    return () => document.removeEventListener("click", handleSectionLinkClick);
-  }, []);
+    const moveToSection = (sectionId: string) => {
+      const section = document.getElementById(sectionId);
+      if (section) scrollToTarget(section, 0.55);
+    };
 
-  useEffect(() => {
     const handleProcessWheel = (event: WheelEvent) => {
-      const section = processSectionRef.current;
-      const showcase = processShowcaseRef.current;
+      if (window.innerWidth <= 1080 || event.ctrlKey || event.deltaY === 0) return;
 
-      if (!section || !showcase || event.ctrlKey || event.deltaY === 0) return;
-      // On phones, advance only after the active card has been read in full.
-      if (window.matchMedia("(max-width: 600px), (pointer: coarse)").matches) return;
+      const tracker = processTrackerRef.current;
+      const stage = tracker?.querySelector<HTMLElement>(".process-scroll-stage");
+      if (!tracker || !stage) return;
 
-
-      if (performance.now() < processNavigationBypassUntilRef.current) return;
-
-      const showcaseBounds = showcase.getBoundingClientRect();
-      const stageTop = 120;
+      const trackerBounds = tracker.getBoundingClientRect();
+      const stageBounds = stage.getBoundingClientRect();
       const direction = event.deltaY > 0 ? 1 : -1;
+      const currentStep = activeStepRef.current;
+      const isPinned = stageBounds.top <= 96 && trackerBounds.bottom >= stageBounds.height + 92;
+      const isReturningFromNextSection =
+        direction < 0 &&
+        currentStep > 0 &&
+        trackerBounds.top < window.innerHeight &&
+        trackerBounds.bottom > -stageBounds.height;
 
-      // After Step 4 releases the page, do not let wheel momentum pull the
-      // visitor back. Re-enable the process only after a deliberate return.
-      if (processExitedAtBottomRef.current) {
-        const hasReturnedNearProcess =
-          direction < 0 && showcaseBounds.bottom >= window.innerHeight * 0.35;
+      if (!isPinned && !isReturningFromNextSection) return;
 
-        if (!hasReturnedNearProcess) {
-          // Absorb the remaining wheel events from the gesture that completed Step 4.
-          if (performance.now() - processExitStartedAtRef.current < 700) event.preventDefault();
-          return;
-        }
-
-        processExitedAtBottomRef.current = false;
-      }
-
-      // Reach the visible tab rail first. A large wheel event that would skip
-      // past it is settled directly beneath the fixed header.
-      if (showcaseBounds.top > stageTop + 2) {
-        if (activeStepRef.current !== 0) setActiveStepIdx(0);
-
-        if (direction > 0 && showcaseBounds.top - event.deltaY <= stageTop) {
-          event.preventDefault();
-          window.scrollTo({ top: window.scrollY + showcaseBounds.top - stageTop, behavior: "auto" });
-          lastProcessStepAtRef.current = performance.now();
-        }
-        return;
-      }
-
-      // The reverse journey uses the same visible rail position.
-      if (showcaseBounds.top < stageTop - 2 && direction < 0) {
-        event.preventDefault();
-        window.scrollTo({ top: window.scrollY + showcaseBounds.top - stageTop, behavior: "auto" });
-        lastProcessStepAtRef.current = performance.now();
-        return;
-      }
-
-      if (showcaseBounds.bottom < window.innerHeight * 0.55) return;
-
-      const now = performance.now();
-      if (now - lastProcessStepAtRef.current < 700) {
-        event.preventDefault();
-        return;
-      }
-
-      const nextStep = activeStepRef.current + direction;
-
-      // At Step 1/4, release the next scroll to the surrounding page.
-      if (nextStep < 0 || nextStep >= processSteps.length) {
-        if (direction > 0) {
-          processExitedAtBottomRef.current = true;
-          processExitStartedAtRef.current = now;
-        }
-        return;
-      }
-
+      // Keep Lenis from receiving this wheel event while a framework card is fixed.
       event.preventDefault();
-      lastProcessStepAtRef.current = now;
+      event.stopImmediatePropagation();
 
-      if (nextStep === processSteps.length - 1 && direction > 0) {
-        processExitedAtBottomRef.current = true;
-        processExitStartedAtRef.current = now;
+      if (processWheelReleaseTimerRef.current) {
+        window.clearTimeout(processWheelReleaseTimerRef.current);
       }
 
-      setActiveStepIdx(nextStep);
+      if (processWheelLockedRef.current) {
+        processWheelReleaseTimerRef.current = window.setTimeout(() => {
+          processWheelLockedRef.current = false;
+        }, 220);
+        return;
+      }
+
+      processWheelLockedRef.current = true;
+      processWheelReleaseTimerRef.current = window.setTimeout(() => {
+        processWheelLockedRef.current = false;
+      }, 220);
+
+      if (isReturningFromNextSection) {
+        scrollToTarget(tracker, 0.15);
+        updateProcessStep(currentStep - 1);
+        return;
+      }
+
+      if (direction > 0 && currentStep === processSteps.length - 1) {
+        moveToSection("outcomes");
+        return;
+      }
+
+      if (direction < 0 && currentStep === 0) {
+        moveToSection("approach");
+        return;
+      }
+
+      updateProcessStep(currentStep + direction);
     };
-    window.addEventListener("wheel", handleProcessWheel, { passive: false });
-    return () => window.removeEventListener("wheel", handleProcessWheel);
+
+    window.addEventListener("wheel", handleProcessWheel, { capture: true, passive: false });
+    return () => {
+      window.removeEventListener("wheel", handleProcessWheel, { capture: true });
+      if (processWheelReleaseTimerRef.current) {
+        window.clearTimeout(processWheelReleaseTimerRef.current);
+      }
+    };
   }, []);
 
   return (
@@ -755,7 +737,7 @@ export default function Home() {
         {/* =========================================
             SECTION 3: A PROVEN ARCHITECTURE — STEP-BY-STEP PROGRESSION
            ========================================= */}
-        <section className="section-wrap process-scroll-section" id="process" ref={processSectionRef}>
+        <section className="section-wrap process-scroll-section" id="process">
           <Reveal>
             <div className="section-head-split">
               <div>
@@ -776,7 +758,13 @@ export default function Home() {
           </Reveal>
 
           {/* Interactive Phase Showcase */}
-          <div className="process-normal-container" ref={processShowcaseRef}>
+          <div className="process-normal-container process-scroll-tracker" ref={processTrackerRef}>
+            <div className="process-scroll-stage">
+              <div className="process-scroll-guidance" aria-hidden="true">
+                <span>Scroll to explore</span>
+                <span className="process-scroll-guidance-line" />
+                <span>{String(activeStepIdx + 1).padStart(2, "0")} / 04</span>
+              </div>
             {/* Executive Phase Selector Bar (4 Interactive Phases) */}
             <div className="process-phase-selector-bar">
               {processSteps.map((step, idx) => {
@@ -786,7 +774,7 @@ export default function Home() {
                   <button
                     key={step.number}
                     type="button"
-                    onClick={() => setActiveStepIdx(idx)}
+                    onClick={() => updateProcessStep(idx)}
                     className={`process-phase-tab-btn ${isActive ? "active" : ""}`}
                     aria-pressed={isActive}
                   >
@@ -810,7 +798,7 @@ export default function Home() {
             <div className="mobile-step-arrow-nav" aria-label="Framework step controls">
               <button
                 type="button"
-                onClick={() => setActiveStepIdx(Math.max(0, activeStepIdx - 1))}
+                onClick={() => updateProcessStep(activeStepIdx - 1)}
                 disabled={activeStepIdx === 0}
                 aria-label="Previous step"
               >
@@ -819,7 +807,7 @@ export default function Home() {
               <span>Step {activeStepIdx + 1} of {processSteps.length}</span>
               <button
                 type="button"
-                onClick={() => setActiveStepIdx(Math.min(processSteps.length - 1, activeStepIdx + 1))}
+                onClick={() => updateProcessStep(activeStepIdx + 1)}
                 disabled={activeStepIdx === processSteps.length - 1}
                 aria-label="Next step"
               >
@@ -832,11 +820,18 @@ export default function Home() {
               <AnimatePresence mode="wait">
                 <motion.div
                   key={activeStepIdx}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
+                  custom={stepDirection}
+                  variants={{
+                    enter: (direction: number) => ({ opacity: 0, x: direction > 0 ? 44 : -44, y: 10 }),
+                    center: { opacity: 1, x: 0, y: 0 },
+                    exit: (direction: number) => ({ opacity: 0, x: direction > 0 ? -44 : 44, y: -10 }),
+                  }}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
                   transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
                   className="step-hero-card"
+                  aria-live="polite"
                 >
                   <div className="step-card-left">
                     <div className="step-indicator-row">
@@ -873,7 +868,7 @@ export default function Home() {
                         {activeStepIdx > 0 && (
                           <button
                             type="button"
-                            onClick={() => setActiveStepIdx(activeStepIdx - 1)}
+                            onClick={() => updateProcessStep(activeStepIdx - 1)}
                             className="btn btn-outline-sm"
                           >
                             <ChevronLeft size={14} />
@@ -883,7 +878,7 @@ export default function Home() {
                         {activeStepIdx < processSteps.length - 1 ? (
                           <button
                             type="button"
-                            onClick={() => setActiveStepIdx(activeStepIdx + 1)}
+                            onClick={() => updateProcessStep(activeStepIdx + 1)}
                             className="btn btn-moss btn-sm"
                           >
                             <span>Next: Step 0{activeStepIdx + 2}</span>
@@ -921,7 +916,8 @@ export default function Home() {
                   </div>
                 </motion.div>
               </AnimatePresence>
-            </div>
+              </div>
+          </div>
           </div>
         </section>
 
