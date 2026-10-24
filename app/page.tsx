@@ -341,7 +341,7 @@ export default function Home() {
       if (processWheelLockedRef.current) {
         processWheelReleaseTimerRef.current = window.setTimeout(() => {
           processWheelLockedRef.current = false;
-        }, 220);
+        }, 650);
         return;
       }
 
@@ -829,7 +829,7 @@ export default function Home() {
                   initial="enter"
                   animate="center"
                   exit="exit"
-                  transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                  transition={{ duration: 0.62, ease: [0.16, 1, 0.3, 1] }}
                   className="step-hero-card"
                   aria-live="polite"
                 >
